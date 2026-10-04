@@ -2,7 +2,7 @@
 
 Chào mừng các bạn đến với Lab 16. Trong bài thực hành này, chúng ta sẽ thiết lập một môi trường Cloud AI hoàn chỉnh trên AWS bằng cách sử dụng **Terraform** (Infrastructure as Code).
 
-**Luồng chính (bắt buộc) của bài lab:** triển khai hạ tầng bằng Terraform, khởi động một **CPU instance nhỏ** (`t3.medium`), và huấn luyện + inference một mô hình **LightGBM** (gradient boosting) thực tế trên đó — không cần GPU, không cần xin quota, không cần tài khoản Hugging Face.
+**Luồng chính (bắt buộc) của bài lab:** triển khai hạ tầng bằng Terraform, khởi động một **CPU instance nhỏ** (`c7i-flex.large`, 2 vCPU / 4 GB RAM, Free Tier-eligible trên tài khoản lab hiện tại), và huấn luyện + inference một mô hình **LightGBM** (gradient boosting) thực tế trên đó — không cần GPU, không cần xin quota, không cần tài khoản Hugging Face.
 
 Ở cuối bài có thêm **Phụ lục (Tùy chọn — bài tập nâng cao)**: nếu bạn muốn thử sức và tài khoản của mình xin được quota GPU, bạn có thể triển khai một mô hình ngôn ngữ lớn (LLM — `google/gemma-4-E2B-it`) lên máy chủ GPU (NVIDIA T4) bằng Docker/vLLM, phục vụ qua Load Balancer. Phần này **không bắt buộc** để hoàn thành lab.
 
@@ -73,7 +73,7 @@ Lệnh này tạo ra hai file: `lab-key` (private key, giữ bí mật) và `lab
 Terraform là công cụ giúp chúng ta khởi tạo hạ tầng AWS hoàn toàn tự động bằng code. Kiến trúc bao gồm:
 - Mạng **Private VPC** cách ly hoàn toàn với bên ngoài.
 - **Bastion Host** (t3.micro) ở Public Subnet: Dùng làm trạm trung chuyển an toàn để SSH vào Compute Node.
-- **Compute Node** (`t3.medium` — 2 vCPU / 4 GB RAM) ở Private Subnet: Đây là nơi bạn sẽ cài đặt và chạy LightGBM. Instance này **mặc định là CPU**; hạ tầng đã được viết sẵn để chuyển sang GPU (`g4dn.xlarge`) nếu bạn làm Phụ lục ở cuối bài, thông qua biến `enable_gpu`.
+- **Compute Node** (`c7i-flex.large` — 2 vCPU / 4 GB RAM, Free Tier-eligible trên tài khoản lab hiện tại) ở Private Subnet: Đây là nơi bạn sẽ cài đặt và chạy LightGBM. Instance này **mặc định là CPU**; hạ tầng đã được viết sẵn để chuyển sang GPU (`g4dn.xlarge`) nếu bạn làm Phụ lục ở cuối bài, thông qua biến `enable_gpu`.
 - **NAT Gateway**: Cho phép Private Subnet tải package/dataset từ internet.
 - **Application Load Balancer (ALB)**: Mở cổng 80 (HTTP), trỏ vào cổng 8000 của Compute Node. Ở luồng CPU mặc định sẽ chưa có gì lắng nghe cổng 8000 nên **health check của ALB sẽ hiển thị "unhealthy" — đây là điều bình thường**, bạn không cần xử lý gì cả trừ khi làm Phụ lục GPU + LLM.
 
@@ -84,11 +84,16 @@ cd terraform
 terraform init
 ```
 
+Trên Windows, sau khi đã chạy `aws configure`, bạn cũng có thể dùng script chuẩn bị sẵn từ thư mục gốc repo: `powershell -ExecutionPolicy Bypass -File .\terraform\deploy.ps1`. Script tự phát hiện IP public, kiểm tra AWS identity, tạo SSH key nếu thiếu, chạy `terraform init`, `validate` và `apply`.
+
 ### Bước 3.2: Triển khai (Apply)
-Với luồng CPU mặc định, bạn **không cần khai báo biến môi trường nào cả** — chỉ cần chạy:
+Với luồng CPU mặc định, giới hạn SSH vào Bastion theo đúng IPv6 public hiện tại của bạn rồi chạy Terraform. Trên PowerShell:
 ```bash
+$env:TF_VAR_allowed_ssh_ipv6_cidr="<YOUR_PUBLIC_IPV6>/128"
 terraform apply
 ```
+Script `deploy.ps1` sẽ tự phát hiện IPv6 này. Nếu chạy Bash thủ công, dùng `export TF_VAR_allowed_ssh_ipv6_cidr="<YOUR_PUBLIC_IPV6>/128"`.
+
 Gõ `yes` khi được hỏi. Quá trình này sẽ mất khoảng **10 đến 15 phút** (phần lớn thời gian là để khởi tạo NAT Gateway).
 
 *Mẹo: Các bạn hãy bắt đầu bấm giờ (benchmark) từ lúc gõ `yes` ở bước này nhé!*
@@ -109,12 +114,9 @@ gpu_private_ip = "10.0.1x.x"
 `gpu_private_ip` chính là IP private của Compute Node (CPU) bạn vừa tạo — tên biến giữ nguyên từ hạ tầng dùng chung với phần GPU tùy chọn. `endpoint_url`/`alb_dns_name` chỉ có ý nghĩa nếu bạn làm Phụ lục GPU + LLM ở cuối bài; ở luồng CPU bạn có thể bỏ qua hai giá trị này.
 
 ### Bước 4.1: SSH vào Compute Node qua Bastion Host
+Terraform in sẵn output `ssh_command`; chạy lệnh đó ngay trong thư mục `terraform`. Lệnh có dạng:
 ```bash
-# SSH vào Bastion Host
-ssh -i lab-key ubuntu@<BASTION_PUBLIC_IP>
-
-# Từ Bastion, SSH vào Compute Node (dùng IP private ở trên)
-ssh ubuntu@<CPU_PRIVATE_IP>
+ssh -i lab-key -o "ProxyCommand=ssh -6 -i lab-key -W %h:%p ubuntu@<BASTION_PUBLIC_IPV6>" ubuntu@<CPU_PRIVATE_IP>
 ```
 
 ### Bước 4.2: Kiểm tra môi trường ML
@@ -149,13 +151,21 @@ kaggle datasets download -d mlg-ulb/creditcardfraud --unzip -p ~/ml-benchmark/
 
 ### Bước 4.4: Huấn luyện và Inference với LightGBM
 
-Viết một script Python (ví dụ `benchmark.py`) thực hiện:
+Terraform đã cài sẵn `/home/ubuntu/ml-benchmark/benchmark.py`. Script thực hiện:
 1. Load dataset và tách tập train/test.
 2. Huấn luyện một `LGBMClassifier` (hoặc `lightgbm.train`) để phát hiện gian lận.
 3. Đo thời gian load data và thời gian training.
 4. Đánh giá model trên tập test: AUC-ROC, Accuracy, F1-Score, Precision, Recall.
 5. Đo **inference latency** (dự đoán 1 dòng) và **inference throughput** (dự đoán 1000 dòng).
 6. Ghi toàn bộ kết quả ra file `benchmark_result.json`.
+
+Chạy benchmark:
+```bash
+cd ~/ml-benchmark
+python3 benchmark.py
+```
+
+Sau khi chạy xong, dùng output Terraform `download_results_command` trên máy local để tải `benchmark_result.json` về thư mục `terraform`.
 
 Chạy script và điền kết quả vào bảng:
 
@@ -200,7 +210,7 @@ Bạn cũng có thể xem các chỉ số này trên **EC2 Console -> Instances 
 
 | Dịch vụ | Instance/Loại | Chi phí/giờ |
 |---|---|---|
-| EC2 — Compute Node | `t3.medium` | ~$0.0416 |
+| EC2 — Compute Node | `c7i-flex.large` | Free Tier-eligible trên tài khoản lab hiện tại; kiểm tra Billing để xác nhận |
 | EC2 — Bastion | `t3.micro` | ~$0.010 |
 | NAT Gateway | (mỗi AZ) | ~$0.045 + data |
 | ALB | Application Load Balancer | ~$0.008 |

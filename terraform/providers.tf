@@ -8,5 +8,6 @@ terraform {
 }
 
 provider "aws" {
-  region = var.aws_region
+  region                 = var.aws_region
+  use_dualstack_endpoint = true
 }

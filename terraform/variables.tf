@@ -26,11 +26,33 @@ variable "enable_gpu" {
 variable "cpu_instance_type" {
   description = "Instance type for the default CPU (LightGBM) compute node"
   type        = string
-  default     = "t3.medium"
+  default     = "c7i-flex.large"
 }
 
 variable "gpu_instance_type" {
   description = "Instance type for the optional GPU (vLLM) compute node"
   type        = string
   default     = "g4dn.xlarge"
+}
+
+variable "allowed_ssh_cidr" {
+  description = "Optional public IPv4 CIDR allowed to SSH to the bastion host (for example 203.0.113.10/32)"
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.allowed_ssh_cidr == null || (can(cidrhost(var.allowed_ssh_cidr, 0)) && can(regex("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}/32$", var.allowed_ssh_cidr)))
+    error_message = "allowed_ssh_cidr must be a single IPv4 address in /32 CIDR form."
+  }
+}
+
+variable "allowed_ssh_ipv6_cidr" {
+  description = "Public IPv6 CIDR allowed to SSH to the bastion host (for example 2001:db8::1/128)"
+  type        = string
+
+  validation {
+    condition     = can(cidrhost(var.allowed_ssh_ipv6_cidr, 0)) && strcontains(var.allowed_ssh_ipv6_cidr, ":") && endswith(var.allowed_ssh_ipv6_cidr, "/128")
+    error_message = "allowed_ssh_ipv6_cidr must be a single IPv6 address in /128 CIDR form."
+  }
 }

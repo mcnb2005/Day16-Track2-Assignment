@@ -4,19 +4,22 @@ data "aws_availability_zones" "available" {
 
 # 1. VPC & Subnets
 resource "aws_vpc" "ai_vpc" {
-  cidr_block           = "10.0.0.0/16"
-  enable_dns_support   = true
-  enable_dns_hostnames = true
-  tags = { Name = "AI-VPC" }
+  cidr_block                       = "10.0.0.0/16"
+  assign_generated_ipv6_cidr_block = true
+  enable_dns_support               = true
+  enable_dns_hostnames             = true
+  tags                             = { Name = "AI-VPC" }
 }
 
 resource "aws_subnet" "public" {
-  count                   = 2
-  vpc_id                  = aws_vpc.ai_vpc.id
-  cidr_block              = cidrsubnet(aws_vpc.ai_vpc.cidr_block, 8, count.index)
-  availability_zone       = data.aws_availability_zones.available.names[count.index]
-  map_public_ip_on_launch = true
-  tags = { Name = "Public-Subnet-${count.index}" }
+  count                           = 2
+  vpc_id                          = aws_vpc.ai_vpc.id
+  cidr_block                      = cidrsubnet(aws_vpc.ai_vpc.cidr_block, 8, count.index)
+  ipv6_cidr_block                 = cidrsubnet(aws_vpc.ai_vpc.ipv6_cidr_block, 8, count.index)
+  availability_zone               = data.aws_availability_zones.available.names[count.index]
+  map_public_ip_on_launch         = true
+  assign_ipv6_address_on_creation = true
+  tags                            = { Name = "Public-Subnet-${count.index}" }
 }
 
 resource "aws_subnet" "private" {
@@ -24,13 +27,13 @@ resource "aws_subnet" "private" {
   vpc_id            = aws_vpc.ai_vpc.id
   cidr_block        = cidrsubnet(aws_vpc.ai_vpc.cidr_block, 8, count.index + 10)
   availability_zone = data.aws_availability_zones.available.names[count.index]
-  tags = { Name = "Private-Subnet-${count.index}" }
+  tags              = { Name = "Private-Subnet-${count.index}" }
 }
 
 # 2. Gateways & Routing
 resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.ai_vpc.id
-  tags = { Name = "AI-IGW" }
+  tags   = { Name = "AI-IGW" }
 }
 
 resource "aws_eip" "nat_eip" {
@@ -40,7 +43,7 @@ resource "aws_eip" "nat_eip" {
 resource "aws_nat_gateway" "nat" {
   allocation_id = aws_eip.nat_eip.id
   subnet_id     = aws_subnet.public[0].id
-  tags = { Name = "AI-NAT" }
+  tags          = { Name = "AI-NAT" }
   depends_on    = [aws_internet_gateway.igw]
 }
 
@@ -49,6 +52,10 @@ resource "aws_route_table" "public_rt" {
   route {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.igw.id
+  }
+  route {
+    ipv6_cidr_block = "::/0"
+    gateway_id      = aws_internet_gateway.igw.id
   }
 }
 
@@ -99,10 +106,11 @@ resource "aws_security_group" "bastion_sg" {
   vpc_id      = aws_vpc.ai_vpc.id
 
   ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] 
+    from_port        = 22
+    to_port          = 22
+    protocol         = "tcp"
+    cidr_blocks      = var.allowed_ssh_cidr == null ? [] : [var.allowed_ssh_cidr]
+    ipv6_cidr_blocks = [var.allowed_ssh_ipv6_cidr]
   }
   egress {
     from_port   = 0
@@ -169,10 +177,11 @@ resource "aws_instance" "bastion" {
   vpc_security_group_ids      = [aws_security_group.bastion_sg.id]
   key_name                    = aws_key_pair.lab_key.key_name
   associate_public_ip_address = true
-  tags = { Name = "AI-Bastion-Host" }
+  ipv6_address_count          = 1
+  tags                        = { Name = "AI-Bastion-Host" }
 }
 
-# 5. Compute Instance (CPU + LightGBM by default; GPU + vLLM optional via var.enable_gpu)
+# 5. Compute Instance (Free Tier-eligible CPU + LightGBM by default; GPU + vLLM optional via var.enable_gpu)
 data "aws_ami" "deep_learning" {
   most_recent = true
   owners      = ["amazon"]
@@ -220,7 +229,9 @@ resource "aws_instance" "gpu_node" {
   user_data = var.enable_gpu ? templatefile("${path.module}/user_data_gpu.sh", {
     hf_token = var.hf_token
     model_id = var.model_id
-  }) : file("${path.module}/user_data_cpu.sh")
+    }) : templatefile("${path.module}/user_data_cpu.sh", {
+    benchmark_script_b64 = filebase64("${path.module}/benchmark.py")
+  })
 
   tags = { Name = var.enable_gpu ? "AI-GPU-Inference-Node" : "AI-CPU-LightGBM-Node" }
 }

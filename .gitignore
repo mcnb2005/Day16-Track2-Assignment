@@ -20,3 +20,11 @@ lab-key.pub
 # Environment Variables
 .env
 .env.local
+
+# Local CLI tools downloaded for this lab
+.tools/
+
+# Local Python environment used to verify the benchmark script
+.venv/
+__pycache__/
+*.pyc
