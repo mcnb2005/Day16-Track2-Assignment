@@ -7,6 +7,10 @@
 5. Mô hình đạt AUC-ROC 0,977386 và accuracy 0,995716 trên tập test 56.962 dòng.
 6. Vì dữ liệu rất mất cân bằng, recall 0,897959 quan trọng hơn accuracy; precision đạt 0,273292 và F1-score đạt 0,419048 tại threshold 0,5.
 7. Median inference latency cho một dòng là 0,5370 ms; throughput cho batch 1.000 dòng đạt khoảng 610.106 dòng/giây.
-8. Snapshot sau benchmark ghi nhận VM có 3,7 GiB RAM, 2 GiB swap và không có network error; Cost Explorer ngày 03/10/2026 hiển thị chi phí EC2/ELB/VPC ước tính 0 USD trong Free Tier.
+8. Snapshot sau benchmark ghi nhận VM có 3,7 GiB RAM, 2 GiB swap và không có network error; AWS Billing ngày 04/10/2026 hiển thị chi phí tháng đến hiện tại là 0,17 USD và tài khoản đang được Free Plan credits chi trả.
 
 Chi tiết đầy đủ nằm trong `benchmark_result.json` và `resource_usage.txt`.
+
+## Bằng chứng AWS Billing
+
+![AWS Billing and Cost Management — month-to-date cost](aws-billing-cost.png)
